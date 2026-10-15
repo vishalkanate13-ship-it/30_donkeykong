@@ -7,6 +7,8 @@ BARREL_R, BARREL_SPEED = 10, 140
 WALK_SPEED, CLIMB_SPEED, JUMP_SPEED, GRAVITY = 170, 110, 380, 900
 BG = (15, 15, 25)
 
+floating_scores = []
+
 # (x_left, x_right, y_at_left, y_at_right)
 PLATFORMS = [
     (0, 800, 570, 570),
@@ -27,19 +29,33 @@ def platform_y(platform, x):
 
 
 def theme_color(score):
-    """Return an (r, g, b) background colour for the current score, or None for the default."""
-    pass
+    """Return a background colour based on the player's score."""
+    if score < 300:
+        return BG
+    elif score < 600:
+        return (30, 20, 45)
+    elif score < 1000:
+        return (55, 25, 40)
+    else:
+        return (75, 25, 30)
+    
 
 
 def on_barrel_jumped(player, barrel):
-    """Called when the player clears a barrel; add a bonus effect here."""
-    pass
+    """Create a floating +100 label when the player jumps over a barrel."""
+    floating_scores.append({
+        "x": float(barrel.pos.x),
+        "y": float(barrel.pos.y),
+        "text": "+100",
+        "timer": 1.0
+    })
 
 
 def score_multiplier(score):
-    """Return a multiplier applied to points earned from clearing a barrel, or None for the default 1x."""
-    pass
-
+    """Return a multiplier for barrel-jump bonuses."""
+    if score >= 500:
+        return 2
+    return 1
 
 class Player:
     def __init__(self):
@@ -164,7 +180,7 @@ class Barrel:
         for index, (lx, _, upper) in enumerate(LADDERS):
             if upper == self.plat and abs(self.pos.x - lx) < 3 and index not in self.skip:
                 self.skip.add(index)
-                if random.random() < 0.7:
+                if random.random() < 0.3:
                     self.ladder = index
                     self.pos.x = lx
 
@@ -184,6 +200,10 @@ def draw_scene(screen, font, player, barrels, score, lives, state):
     pygame.draw.circle(screen, (255, 150, 200), (PRINCESS_POS[0], PRINCESS_POS[1] - 14), 10)
     for barrel in barrels:
         pygame.draw.circle(screen, (170, 100, 40), barrel.pos, BARREL_R)
+
+    for effect in floating_scores:
+        text = font.render(effect["text"], True, (255, 255, 0))
+        screen.blit(text, (int(effect["x"]), int(effect["y"])))
     body = pygame.Rect(0, 0, PLAYER_W, PLAYER_H)
     body.midbottom = (player.pos.x, player.pos.y)
     pygame.draw.rect(screen, (50, 180, 240), body)
@@ -206,6 +226,14 @@ def main():
     running = True
     while running:
         dt = min(clock.tick(60) / 1000, 0.05)
+
+        for effect in floating_scores[:]:
+            effect["y"] -= 40 * dt
+            effect["timer"] -= dt
+
+            if effect["timer"] <= 0:
+                floating_scores.remove(effect)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -223,6 +251,28 @@ def main():
                 spawn_timer = random.uniform(1.8, 3.2)
             for barrel in barrels:
                 barrel.update(dt)
+                # Award a bonus when the player is airborne and their feet
+                # are clearly above the barrel, with the barrel close horizontally.
+                # Check scoring before collision so a successful jump can be scored.
+                above_barrel = player.pos.y < barrel.pos.y - BARREL_R
+                close_horizontally = abs(barrel.pos.x - player.pos.x) < 25
+
+                if (
+                    not player.on_ground
+                    and above_barrel
+                    and close_horizontally
+                    and not barrel.scored
+                ):
+                    barrel.scored = True
+                    bonus = int(100 * score_multiplier(score))
+                    score += bonus
+                    floating_scores.append({
+                        "x": float(barrel.pos.x),
+                        "y": float(barrel.pos.y) - 25,
+                        "text": f"+{bonus}",
+                        "timer": 1.0
+                    })
+
                 hit_range = BARREL_R + PLAYER_W / 2
                 if player.center().distance_squared_to(barrel.pos) < hit_range ** 2:
                     lives -= 1
@@ -230,11 +280,6 @@ def main():
                     barrels.clear()
                     state = "play" if lives > 0 else "lose"
                     break
-                above = 0 < barrel.pos.y - player.pos.y + BARREL_R < 40
-                if not player.on_ground and above and abs(barrel.pos.x - player.pos.x) < 12 and not barrel.scored:
-                    barrel.scored = True
-                    score += int(100 * (score_multiplier(score) or 1))
-                    on_barrel_jumped(player, barrel)
             barrels[:] = [b for b in barrels if b.pos.y < HEIGHT + 30]
             if player.center().distance_to(pygame.Vector2(PRINCESS_POS)) < 24:
                 score += 1000
